@@ -1,0 +1,184 @@
+
+<!-- saved from url=(0028)https://aeium.github.io/729/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>729</title>
+
+</head><body><div id="container">
+<canvas id="gears" width="1920" height="872" style="z-index: 30;"></canvas>
+
+<script src="./game-template_files/sketch.min.js.download"></script>
+
+<script>
+//  <script><iframe scrolling="no" frameborder="0" allowtransparency="true" src="./game-template_files/widget_iframe.5b0c4d3ea3997aa2c22eac39be510646.html" title="Twitter settings iframe" style="display: none;"></iframe></body></html>
+
+// https://gist.github.com/joates/6584908
+function linspace(a,b,n) {
+    if(typeof n === "undefined") n = Math.max(Math.round(b-a)+1,1);
+    if(n<2) { return n===1?[a]:[]; }
+    var i,ret = Array(n);
+    n--;
+    for(i=n;i>=0;i--) { ret[i] = (i*b+(n-i)*a)/n; }
+    return ret;
+}
+
+var toothSize = 20
+
+// d = 2 * pi * r   d/(2*pi) = r 
+
+var canvas = document.getElementById('gears')
+var ctx    = canvas.getContext('2d')
+
+
+ctx.fillStyle   = 'grey'
+ctx.strokeStyle = 'black'
+ctx.lineWidth   = 3
+
+// data oriented makes more sense, but for this task and also in general
+metaList     = []
+xPositions   = []
+yPositions   = []
+teethNums    = []
+angles       = []
+parities     = []
+attachments  = [] // this is going to be a list of lists
+
+// the basic idea is to have a set of gears that are intermeshed, but some of the gears have gaps.
+// the player must move the gears back and forth to detangle the original gear
+
+function drawGears(){
+    for(var i = 0; i < xPositions.length; i++){
+        drawGear(i)
+    }
+}
+
+function drawGear(index){ 
+
+    var x      = xPositions[index]
+    var y      = yPositions[index]
+    var teeth  = teethNums[index]
+    var angle  = angles[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
+    var parity = parities[index]
+    
+    console.log('drawingGear')
+    
+    var teethSegments = teeth * 2
+
+    var radius = (teethSegments * toothSize)/(2 * Math.PI)
+    
+    //console.log(angle)
+    
+    var arcFraction = 2*Math.PI / teethSegments
+    
+    ctx.beginPath()
+    
+    console.log(parity)
+    
+    for(var i = 0; i < teethSegments+1; i++){
+
+
+        if(i%2 == parity){
+            ctx.arc(x,y,radius-10,(angle-arcFraction/2)+i*arcFraction+arcFraction/6,(angle-arcFraction/2)+(i+1)*arcFraction-arcFraction/6)
+        } else {
+            ctx.arc(x,y,radius+10,(angle-arcFraction/2)+i*arcFraction+arcFraction/6,(angle-arcFraction/2)+(i+1)*arcFraction-arcFraction/6)
+        }
+
+    }
+    
+
+    
+    ctx.fill()
+    ctx.stroke()
+    ctx.closePath()
+
+
+    
+}
+
+// prev index gives reference to the previous gears
+// toothSegmentAttach tell new gear where to go and what slot or peg to touch
+// checkValid scans other gears to find conflicts (if I implement it)
+
+function addGear(x,y,teeth,angle,parity = 0){
+
+    metaList.push(metaList.length)
+    xPositions.push(x)
+    yPositions.push(y)
+    teethNums.push(teeth)
+    angles.push(angle)
+    parities.push(parity)
+
+}
+
+function moveTowards(x,y,angle,distance){
+
+    newX = x + Math.cos(angle) * distance
+    newY = y + Math.sin(angle) * distance
+    return [newX,newY]
+}
+
+
+function rotate(startIndex, angleDiff, list){
+
+    var workList = list.slice(0, i).concat(list.slice(i + 1, list.length))
+
+    var startGearTeeth = teethNums[startIndex]
+    
+    angles[startIndex] += angleDiff
+    
+    for(var i = 0; i < attachments[startIndex].length; i++){
+    
+        if(workList.includes(i)){
+        
+            var target = attachments[startIndex][i]
+            var targetTeeth = teethNums[target]
+            
+            var targetDiff = angleDiff * (startGearTeeth / targetTeeth)
+            
+            workList = rotate(i,targetDiff,workList)
+        }
+    }
+
+    return workList
+    
+}
+
+function addPairedGear(prevIndex,toothSegmentAttach, teethNew, checkValid = false){
+
+    var prI = prevIndex
+    
+    var prevX        = xPositions[prI]
+    var prevY        = yPositions[prI]
+    
+    var prevAngle    = angles[prI]
+    var prevSegments = teethNums[prI]*2
+    
+    var arcFractionOld = 2*Math.PI / prevSegments
+    var towardsNew = prevAngle + toothSegmentAttach * arcFractionOld // gives the angle towards the new gear
+    
+    var oldRadius = (prevSegments * toothSize)/(2 * Math.PI)
+    var newRadius = (teethNew * 2 * toothSize)/(2 * Math.PI)
+
+    var newPos = moveTowards(prevX,prevY,towardsNew,oldRadius+newRadius+3)
+    
+    var newX = newPos[0]
+    var newY = newPos[1]
+    
+    var oldParity = parities[prevIndex]
+    
+    //console.log(towardsNew)
+    
+    attachments[prevIndex].append[xPositions.length]
+    addGear(newX,newY,teethNew,towardsNew+Math.PI,oldParity+1%2)
+
+}
+
+addGear(300,300,12,1)
+
+addPairedGear(0,0,8)
+
+
+drawGears()
+
+
+
+</script>
+
