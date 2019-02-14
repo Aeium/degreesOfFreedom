@@ -1,0 +1,736 @@
+
+<!-- saved from url=(0028)https://aeium.github.io/729/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>729</title>
+
+</head><body><div id="container">
+<canvas id="gears" width="820" height="820" style="z-index: 30;"></canvas>
+
+<script src="./game-template_files/sketch.min.js.download"></script>
+
+<script>
+//  <script><iframe scrolling="no" frameborder="0" allowtransparency="true" src="./game-template_files/widget_iframe.5b0c4d3ea3997aa2c22eac39be510646.html" title="Twitter settings iframe" style="display: none;"></iframe></body></html>
+
+// https://gist.github.com/joates/6584908
+function linspace(a,b,n) {
+    if(typeof n === "undefined") n = Math.max(Math.round(b-a)+1,1);
+    if(n<2) { return n===1?[a]:[]; }
+    var i,ret = Array(n);
+    n--;
+    for(i=n;i>=0;i--) { ret[i] = (i*b+(n-i)*a)/n; }
+    return ret;
+}
+
+var toothSize = 20
+
+var recordFrames = false
+if(recordFrames){
+
+var ws = new WebSocket('ws://localhost:8080/');
+		ws.onopen = function() {
+			console.log('CONNECT');
+		};
+		ws.onclose = function() {
+			console.log('DISCONNECT');
+		};
+		ws.onmessage = function(event) {
+			console.log('MESSAGE: ' + event.data);
+		};
+		
+		var frames = 656100;
+		// Request Animation Frame Override
+		var raf = window.requestAnimationFrame;
+		var next = null;
+		var hold = false;
+		window.requestAnimationFrame = function rafOverride(callback) {
+		  // Find canvas
+		  var canvas = document.getElementById("gears");//document.querySelector('canvas');
+		  if (canvas) {
+		    // Done capturing?
+		    if (frames < 0) {
+		      window.requestAnimationFrame = raf;
+		      return raf(callback);
+		    }
+		    // Hold rendering until screenshot is done
+		    if (!hold) {
+		      hold = true;
+		      frames--;
+		      setTimeout(function () {
+		        callback();
+		        capture(canvas, function () {
+		          // Resume rendering
+		          hold = false;
+		          rafOverride(next);
+		        });
+		      }, 5);
+		    }
+		    else {
+		      next = callback;
+		    }
+		  }
+		  else {
+		    // Canvas not created yet?
+		    return raf(callback);
+		  }
+		}
+		function capture(canvas, callback) {
+		  // Capture image and strip header from string.  
+		  
+		  //var pixNum = animRetY * 810 +  animRetX
+		  
+		  //console.log(pixNum)
+		  
+		  
+		  var image = canvas.toDataURL('image/png').slice(22); //("000000" + pixNum).slice(-6) + 
+		  // Writing image as msg
+		  ws.send(image);
+		  setTimeout(function () {
+		    // Resume rendering
+		    callback();
+		  }, 5);
+		}
+
+}
+
+// https://gist.github.com/jupdike/bfe5eb23d1c395d8a0a1a4ddd94882ac
+// based on the math here:
+// http://math.stackexchange.com/a/1367732
+
+// x1,y1 is the center of the first circle, with radius r1
+// x2,y2 is the center of the second ricle, with radius r2
+function intersectTwoCircles(x1,y1,r1, x2,y2,r2) {
+  var centerdx = x1 - x2;
+  var centerdy = y1 - y2;
+  var R = Math.sqrt(centerdx * centerdx + centerdy * centerdy);
+  if (!(Math.abs(r1 - r2) <= R && R <= r1 + r2)) { // no intersection
+    return []; // empty list of results
+  }
+  // intersection(s) should exist
+
+  var R2 = R*R;
+  var R4 = R2*R2;
+  var a = (r1*r1 - r2*r2) / (2 * R2);
+  var r2r2 = (r1*r1 - r2*r2);
+  var c = Math.sqrt(2 * (r1*r1 + r2*r2) / R2 - (r2r2 * r2r2) / R4 - 1);
+
+  var fx = (x1+x2) / 2 + a * (x2 - x1);
+  var gx = c * (y2 - y1) / 2;
+  var ix1 = fx + gx;
+  var ix2 = fx - gx;
+
+  var fy = (y1+y2) / 2 + a * (y2 - y1);
+  var gy = c * (x1 - x2) / 2;
+  var iy1 = fy + gy;
+  var iy2 = fy - gy;
+
+  // note if gy == 0 and gx == 0 then the circles are tangent and there is only one solution
+  // but that one solution will just be duplicated as the code is currently written
+  return [[ix1, iy1], [ix2, iy2]];
+}
+
+
+// d = 2 * pi * r   d/(2*pi) = r 
+
+var canvas = document.getElementById('gears')
+var ctx    = canvas.getContext('2d')
+
+
+ctx.fillStyle   = 'grey'
+ctx.strokeStyle = 'black'
+ctx.lineWidth   = 3
+
+// data oriented makes more sense, but for this task and also in general
+metaList         = []
+xPositions       = []
+yPositions       = []
+teethNums        = []  // to determine circumfrence of gear
+teethStops       = []  // to determien how many teeth are actually drawn
+angles           = []
+angleStart       = []  //  angle of first mechanical projection 
+angleStop        = []  //  angle of last  mechanical projection
+parities         = []
+
+// these pertain to connections between gears
+// each one is a list of all connections for each gear
+
+// ex: attachments[0] is a list of all connetions for gear 0
+//     attachments[0][0] is the first gear that gear 0 is attached to, and returns the index of that gear
+//     attachmentAngles[0][0] is the angle towards that gear
+//     meshAngles[0][0] is a list of two angles, one towards both sides of the mesh area between the two gears
+attachments      = [] // this is going to be a list of lists
+attachmentAngles = []
+meshAngles       = [] // angle of where mesh starts
+
+// the basic idea is to have a set of gears that are intermeshed, but some of the gears have gaps.
+// the player must move the gears back and forth to detangle the original gear
+
+function drawGears(){
+
+    //ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'skyblue'
+    //ctx.fillRect(0, 0, canvas.width, canvas.height);
+    //for(var i = 0; i < xPositions.length; i++){
+        lasers(0)
+    //}
+    
+    for(var i = 0; i < xPositions.length; i++){
+        drawGear(i)
+    }
+}
+
+function drawGear(index){
+
+    var x         = xPositions[index]
+    var y         = yPositions[index]
+    var teeth     = teethNums[index]
+    var angle     = angles[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
+    var parity    = parities[index]
+    var teethStop = teethStops[index]
+    
+    var teethSegments = teeth * 2
+    
+    var radius = (teethSegments * toothSize)/(2 * Math.PI)
+    
+    //console.log(angle)
+    
+    var arcFraction = 2*Math.PI / teethSegments
+    
+    ctx.beginPath()
+    
+    ctx.moveTo(x,y)
+    
+    var teethDrawn = 0
+     
+    for(var i = 0; i < teethSegments+1; i++){
+
+        if(teethDrawn >= teethStop){
+            break
+        }
+        //console.log(i)
+
+        if(i%2 == parity){
+            if(teethDrawn != 0){
+                ctx.arc(x,y,radius-10,(angle-arcFraction/2)+i*arcFraction+arcFraction/6,(angle-arcFraction/2)+(i+1)*arcFraction-arcFraction/6)
+            }
+        } else {
+            ctx.arc(x,y,radius+10,(angle-arcFraction/2)+i*arcFraction+arcFraction/6,(angle-arcFraction/2)+(i+1)*arcFraction-arcFraction/6)
+            teethDrawn += 1
+        }
+    }
+    
+    // parity for first gear = 0
+    
+    var firstNum = 1
+    var lastNum  = firstNum + teethStop * 2
+    
+   // angleStart.push( firstNum*arcFraction ) 
+   // angleStop.push( lastNum+1*arcFraction ) 
+    
+    /*if(index == 0){
+    
+        ctx.arc(x,y,radius+10,(angle-arcFraction/2)+firstNum*arcFraction+arcFraction/6,(angle-arcFraction/2)+(lastNum+1)*arcFraction-arcFraction/6)
+        
+        console.log('arc draw correct, angles:')
+        console.log('arcFraction:   ' + arcFraction)
+        console.log('firstNum :   ' + firstNum)
+        console.log('lastNum :   ' + lastNum)
+        console.log((angle-arcFraction/2)+firstNum*arcFraction+arcFraction/6)
+        console.log((angle-arcFraction/2)+(lastNum+1)*arcFraction-arcFraction/6)
+    
+    }*/
+    
+    ctx.moveTo(x,y)
+    
+    if(parity == 0){
+    
+        ctx.fillStyle = 	"rgb(42,42,52)"
+    
+    } else {
+    
+        ctx.fillStyle = 	"rgb(100,100,110)"
+    }
+    
+    //ctx.fill()
+    ctx.stroke()
+    ctx.closePath()
+
+    
+    ctx.beginPath()
+    ctx.arc(x,y,radius/4,0,Math.PI*2)
+    ctx.fill()
+    ctx.closePath()
+    
+    /*
+    var ret = moveTowards(x,y,angle, 40)
+    
+    ctx.beginPath()
+    ctx.moveTo(x,y)
+    ctx.lineTo(ret[0],ret[1])
+    ctx.stroke()*/
+     
+}
+
+
+// prev index gives reference to the previous gears
+// toothSegmentAttach tell new gear where to go and what slot or peg to touch
+// checkValid scans other gears to find conflicts (if I implement it)
+
+function addGear(x,y,teeth,angle,parity = 0, attach = [], teethStop = 'default'){
+
+    if(teethStop == 'default'){
+    
+        teethStop = teeth * 2
+    
+    }
+    
+    //angleStart   = []  //  angle of first mechanical projection 
+    //angleStop    = []  //  angle of last  mechanical projection
+    
+    var teethSegments = teeth * 2
+    
+    var arcFraction = 2*Math.PI / teethSegments
+    
+    var firstNum = 1 - parity
+    var lastNum  = teethStop *2 - 1 - parity
+    
+
+        console.log('~~~~ add gear')
+        console.log('arc draw correct, angles:')
+        console.log('arcFraction:   ' + arcFraction)
+        console.log('firstNum :   ' + firstNum)
+        console.log('lastNum :   ' + lastNum)
+        console.log(angle)
+        console.log((angle-arcFraction/2)+firstNum*arcFraction+arcFraction/6)
+        console.log((angle-arcFraction/2)+(lastNum+1)*arcFraction-arcFraction/6)
+    
+    angleStart.push( (-arcFraction/2)+firstNum*arcFraction+arcFraction/6) 
+    angleStop.push( (-arcFraction/2)+(lastNum+1)*arcFraction-arcFraction/6) 
+
+    var selfIndex = metaList.length
+    
+    metaList.push(selfIndex)
+    attachments.push(attach)
+    xPositions.push(x)
+    yPositions.push(y)
+    teethNums.push(teeth)
+    teethStops.push(teethStop)
+    angles.push(angle)
+    parities.push(parity)
+    
+    attachmentAngles.push([])
+    meshAngles.push([])
+    
+    console.log(attachmentAngles)
+    console.log(attachmentAngles.length)
+    console.log(metaList.length)
+    
+    // this functionality should allow a gear to be created connecting multiple gears
+    // but it might be easier to manually attach each with a function call to connect gears
+    // the two methods seem to be competing a bit and perhaps it's a better process to just connect each gear with it's own function call
+    // that task is not performance critical, but clarity is critical
+    
+    for(var i = 0; i < attach.length; i++){
+        
+        var targetX = xPositions[attachments[i]]
+        var targetY = yPositions[attachments[i]]
+        
+        attachmentAngles[metaList.length -1].push(getAngle(x,y,targetX,targetY))  // push to most recent one
+        
+    }
+    
+    var angletoMesh11 = getAngle(x,y,ret[0][0],ret[0][1])
+    var angletoMesh12 = getAngle(x,y,ret[1][0],ret[1][1])
+
+    meshAngles[index1].push([angletoMesh11,angletoMesh12])
+    meshAngles[index2].push([angletoMesh21,angletoMesh22])
+    
+    console.log(teethStop)
+    
+    return selfIndex
+
+}
+
+function lasers(index){
+ 
+    var x       = xPositions[index]
+    var y       = yPositions[index]
+    var teeth   = teethNums[index]
+    var angle   = angles[index]
+    var angle1  = angle+angleStart[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
+    var angle2  = angle+angleStop[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
+    var parity  = parities[index]
+    
+    var teethSegments = teeth * 2
+    
+    var radius = (teethSegments * toothSize)/(2 * Math.PI)
+    
+    //console.log(angle)
+    
+    var arcFraction = 2*Math.PI / teethSegments
+    
+    ctx.beginPath()
+
+    ctx.beginPath()
+    ctx.moveTo(x,y)
+    
+    var dest = moveTowards(x,y, angle1, 2000 )
+    
+    if(parity == 1){
+        ctx.strokeStyle = "rgb(100,100,110)"
+    } else {
+        ctx.strokeStyle = "rgb(42,42,52)"
+    }
+    
+    ctx.lineTo(dest[0],dest[1])
+    ctx.stroke()
+    ctx.closePath()
+    
+    ctx.beginPath()
+
+    ctx.beginPath()
+    ctx.moveTo(x,y)
+    
+    var dest = moveTowards(x,y, angle2, 2000 )
+    
+    if(parity == 1){
+        ctx.strokeStyle = "rgb(100,100,110)"
+    } else {
+        ctx.strokeStyle = "rgb(42,42,52)"
+    }
+    
+    ctx.lineTo(dest[0],dest[1])
+    ctx.stroke()
+    ctx.closePath()
+    
+    ctx.strokeStyle = 'black'
+
+}
+
+function moveTowards(x,y,angle,distance){
+
+    newX = x + Math.cos(angle) * distance
+    newY = y + Math.sin(angle) * distance
+    return [newX,newY]
+}
+
+function getAngle(x1,y1,x2,y2){
+
+    diffX = x2 - x1
+    diffY = y2 - y1
+
+    return(Math.atan2(diffY,diffX))
+    
+}
+
+
+function rotate(startIndex, angleDiff, workList = metaList){
+
+    // list contains a number for each gear.
+    // I don't want to process any gear more than once on the same turn
+    // So I am having each rotation cross it's gear number off the list
+    
+    if(workList.includes(startIndex)){
+        var self = workList.indexOf(startIndex)
+        workList = workList.slice(0, self).concat(workList.slice(self + 1, workList.length))
+    }
+    else {
+        return workList
+    }
+    //var workList = list.slice(0, i).concat(list.slice(i + 1, list.length))
+
+    //console.log(workList)
+    
+    var startGearTeeth = teethNums[startIndex]
+    
+    if(parities[startIndex] == 0){
+        angles[startIndex] += angleDiff
+    } else {
+        angles[startIndex] -= angleDiff
+    }
+    
+    var angleA         =  angles[startIndex]               % (2 * Math.PI)
+    var gearIntervalA1 =  (angleA + angleStart[startIndex])  % (2 * Math.PI)
+    var gearIntervalA2 =  (angleA + angleStop[startIndex])   % (2 * Math.PI)
+
+    
+    var gearIntervalB1 =  null
+    var gearIntervalB2 =  null
+    var angleB         =  null
+
+    var meshCheck = false
+    
+    
+    for(var i = 0; i < attachments[startIndex].length; i++){
+    
+        if(workList.includes(attachments[startIndex][i])){
+        
+            // meshCheck1
+            
+            var towardsAngle = attachmentAngles[startIndex][i]
+            
+            /*
+            console.log("gearIntervalA1 <= towardsAngle:  ")// + gearIntervalA1 <= towardsAngle)
+            console.log(gearIntervalA1 <= towardsAngle)
+            console.log("towardsAngle < gearIntervalA2:   ")
+            console.log(towardsAngle < gearIntervalA2)
+            
+            console.log(gearIntervalA1)
+            console.log(gearIntervalA2)
+            console.log(towardsAngle)
+            */
+            
+            var meshAngleRet = meshAngles[startIndex][i]
+            
+            console.log(meshAnglesRet)
+            
+            if(gearIntervalA1 <= towardsAngle && towardsAngle < gearIntervalA2){
+            
+
+            
+                meshCheck = true
+            
+            }
+            
+
+
+            //angleB         =  angles[attachments[startIndex][i]]
+            //gearIntervalB1 = angleB + angleStart[attachments[startIndex][i]] + Math.PI  // do I just need to add Pi?
+            //gearIntervalB2 = angleB + angleStart[attachments[startIndex][i]] + Math.PI
+            
+            if(meshCheck){
+            
+                /*
+                console.log((gearIntervalA1 <= gearIntervalB1))
+                console.log((gearIntervalB1 < gearIntervalA2))
+                console.log((gearIntervalA1 <= gearIntervalB1))
+                console.log(( gearIntervalB2 < gearIntervalA2))
+           
+                console.log(angleA)
+                console.log(angleB) */
+            
+                var target = attachments[startIndex][i]
+                var targetTeeth = teethNums[target]
+                
+                var targetDiff = angleDiff * (startGearTeeth / targetTeeth)
+                
+                workList = rotate(attachments[startIndex][i],targetDiff,workList)
+            
+            }
+        }
+    }
+
+    return workList
+    
+}
+
+function rotateRedraw(startIndex,angleDiff){
+
+    ret = rotate(startIndex, angleDiff)
+    
+    drawGears()
+
+}
+
+// list of all attachments
+
+// does list of attachments need to be per gear?
+
+// might make more sense to list attachments independantly
+
+
+function pairGears(index1, index2){
+
+    var x1 = xPositions[index1]
+    var y1 = yPositions[index1]
+    var x2 = xPositions[index2]
+    var y2 = yPositions[index2]
+    
+    angle1to2 = getAngle(x1,y1,x2,y2)
+    
+    // maybe check for duplicate attachments?
+    
+    attachments[index1].push(index2)
+    attachmentAngles[index1].push(angle1to2)
+
+    attachments[index2].push(index1)
+    attachmentAngles[index2].push((angle1to2 + Math.PI) % (Math.PI * 2))  // adding Pi to flip angle around
+    
+    //function intersectTwoCircles(x1,y1,r1, x2,y2,r2) {
+    //return [[ix1, iy1], [ix2, iy2]];
+   
+    
+    var r1 = (teethNums[index1]*2 * toothSize)/(2 * Math.PI) +10
+    var r2 = (teethNums[index2]*2 * toothSize)/(2 * Math.PI) +10
+
+    console.log('radius')
+    
+    console.log(x1)
+    console.log(y1)
+    console.log(r1)
+    console.log(x2)
+    console.log(y2)
+    console.log(r2)
+    
+    var ret = intersectTwoCircles(x1,y1,r1,x2,y2,r2)
+    
+    //ctx.beginPath()
+    //ctx.moveTo(x1,y1)
+    //ctx.arc(x,y,
+    
+    console.log(ret)
+    
+    var angletoMesh11 = getAngle(x1,y1,ret[0][0],ret[0][1])
+    var angletoMesh12 = getAngle(x1,y1,ret[1][0],ret[1][1])
+    
+    var angletoMesh21 = getAngle(x2,y2,ret[0][0],ret[0][1])
+    var angletoMesh22 = getAngle(x2,y2,ret[1][0],ret[1][1])
+
+    meshAngles[index1].push([angletoMesh11,angletoMesh12])
+    meshAngles[index2].push([angletoMesh21,angletoMesh22])
+    
+    ctx.strokeStyle = 'black'
+    
+    var ret2 = moveTowards(x1,y1,angle1toMesh, 300)
+    
+    ctx.beginPath()
+    ctx.moveTo(x1,y1)
+    ctx.lineTo(ret[0][0],ret[0][1])
+    ctx.stroke()
+    ctx.closePath()
+    
+    ctx.beginPath()
+    ctx.moveTo(x1,y1)
+    ctx.lineTo(ret2[0],ret2[1])
+    ctx.stroke()
+    ctx.closePath()
+    
+    console.log(x1)
+    console.log(y1)
+    console.log(ret[0][0])
+    console.log(ret[0][1])
+    
+    //ctx.fillRect(x1,y1,200,200)
+    
+    console.log('did this run!!?!??')
+    
+    //function intersectTwoCircles(x1,y1,r1, x2,y2,r2)
+    
+
+
+}
+
+function addPairedGear(prevIndex,toothSegmentAttach, teethNew, checkValid = false, teethStop){
+
+    var prI = prevIndex
+    
+    var prevX        = xPositions[prI]
+    var prevY        = yPositions[prI]
+    
+    var prevAngle    = angles[prI]
+    var prevSegments = teethNums[prI]*2
+    
+    var arcFractionOld = 2*Math.PI / prevSegments
+    var towardsNew = prevAngle + toothSegmentAttach * arcFractionOld // gives the angle towards the new gear
+    
+    var oldRadius = (prevSegments * toothSize)/(2 * Math.PI)
+    var newRadius = (teethNew * 2 * toothSize)/(2 * Math.PI)
+
+    var newPos = moveTowards(prevX,prevY,towardsNew,oldRadius+newRadius+3)
+    
+    var newX = newPos[0]
+    var newY = newPos[1]
+    
+    var oldParity = parities[prevIndex]
+    
+    console.log(teethStop)
+    
+    var newIndex = addGear(newX,newY,teethNew,towardsNew+Math.PI,(oldParity+1)%2, attach = [prevIndex], teethStop)
+    pairGears(prevIndex, newIndex)
+
+}
+
+//function addGear(x,y,teeth,angle,parity = 0, attach = [], teethStop = 'default'){
+
+addGear(110,340,12,1,parity = 0, attach = [], teethStop = 5)
+
+addPairedGear(0,2,12, checkValid = false)
+
+
+
+//addGear(545,420,13,1)
+
+
+//drawGears()
+
+var rotSum = 0
+
+var fps = 40
+function movediv(timestamp){
+    //setTimeout(function(){ //throttle requestAnimationFrame to 20fps
+        rotateRedraw(0,.01)
+        rotSum += .01
+        
+        total = (Math.PI * 2) / 12
+        
+        if(rotSum >= total){
+        
+            recordFrames = false
+        }
+        
+        window.requestAnimationFrame(movediv)
+    //}, 1000/fps)
+}
+
+var frameCount = 0 
+
+function animate(){
+
+        //console.log(rotSum)
+    
+        rotateRedraw(0,.01)
+        rotSum += .01
+        
+        total = (Math.PI * 2) / 12
+       
+        if(rotSum >= total){
+        
+            recordFrames = false
+        } else {
+        
+            if( frameCount % 10 == 0){
+            
+                console.log("interval  " + rotSum + " / " + total)
+            
+            }
+            
+            console.log(frameCount)
+        
+            window.requestAnimationFrame(animate)
+
+        }
+        frameCount += 1
+}
+
+function animate2(){
+
+        //console.log(rotSum)
+    
+        
+        rotateRedraw(0,.03)
+            
+        //console.log(frameCount)
+    
+        window.requestAnimationFrame(animate2)
+
+        
+        frameCount += 1
+}
+
+ window.onload = function() {
+    //animate2()
+ };
+
+ //document.addEventListener("click", animate2);
+
+
+</script>
+
