@@ -93,6 +93,12 @@ var ws = new WebSocket('ws://localhost:8080/');
 
 // d = 2 * pi * r   d/(2*pi) = r 
 
+function mod(input, modulus){
+
+    return ((input % modulus) + modulus) % modulus
+
+}
+
 var canvas = document.getElementById('gears')
 var ctx    = canvas.getContext('2d')
 
@@ -112,13 +118,17 @@ parities     = []
 attachments      = []   // this is going to be a list of lists
 attachmentAngles = []
 meshAngles       = [] // angle of where mesh starts
+meshPoints       = []
 
 
-wormHead         = [0, 0.0 ]    // int gear index, float radian position
+
+wormHead         = [0, Math.PI ]    // int gear index, float radian position
   
 wormStarts       = []
 wormStops        = []
 
+
+var highlight = -1
 
 function intersectTwoCircles(x1,y1,r1, x2,y2,r2) {
   var centerdx = x1 - x2;
@@ -155,6 +165,8 @@ function intersectTwoCircles(x1,y1,r1, x2,y2,r2) {
 // the basic idea is to have a set of gears that are intermeshed, but some of the gears have gaps.
 // the player must move the gears back and forth to detangle the original gear
 
+var count = 0
+
 function drawGears(){
 
     //ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -167,6 +179,7 @@ function drawGears(){
     for(var i = 0; i < xPositions.length; i++){
         drawGear(i)
     }
+
     
     var wHG  = wormHead[0]  // worm head gear
     var wHA  = wormHead[1]  // worm head angle
@@ -179,18 +192,34 @@ function drawGears(){
 
     //console.log(ret)
     
+    //if(count % 20 == 0){
+    
+    //console.log(wormHead[1])
+    
+    //}
+    
+    wormStops[wHG][wormStops[wHG].length-1] = wHA
+    
+    count += 1
+    
     ctx.strokeStyle = 'yellow'
     ctx.fillStyle = 'yellow'
     
     ctx.beginPath()
     
-    ctx.arc(ret[0], ret[1], 15, 0,  2*Math.PI)
+    ctx.arc(ret[0], ret[1], 11, 0,  2*Math.PI)
     
     ctx.fill()
     ctx.stroke()
     ctx.closePath()
+    
+    for(var i = 0; i < xPositions.length; i++){
+        drawWorm(i)
+    }
    
 }
+
+
 
 function drawGear(index){ 
 
@@ -200,7 +229,7 @@ function drawGear(index){
     var angle  = angles[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
     var parity = parities[index]
     
-    
+
     
     var teethSegments = teeth * 2
     
@@ -234,31 +263,20 @@ function drawGear(index){
         ctx.fillStyle = 	"rgb(100,100,110)"
     }
     
+    ctx.lineWidth = 4
+    
     ctx.fill()
-    //ctx.stroke()
-    ctx.closePath()
     
-    /*
+    //console.log(highlight)
     
-    ctx.strokeStyle = 'green'
-    ctx.lineWidth = 6
-    
-    for(var i = 0; i < wormStarts[index].length; i += 1){
-    
-        var start = wormStarts[index][i]
-        var end = wormStops[index][i]
-    
-        console.log('~~~~~')
-        console.log(start)
-        console.log(end)
-    
-        ctx.beginPath()
-        ctx.arc(x,y,radius,start,end)
+    if(highlight == index){
+        //console.log(ctx.strokeStyle)
         ctx.stroke()
-        ctx.closePath()
-        
+    }
     
-    }*/
+    //if(count %20  == 0){
+    
+    //}
     
     
     ctx.font = "20px Georgia";
@@ -266,12 +284,17 @@ function drawGear(index){
     
     ctx.fillText(index, x,y)
     
-    ctx.strokeStyle = 'red'
+    //if(index == 0){
     
-    for(var i = 0; i < meshAngles[index].length; i += 1){
+    ctx.lineWidth = 1
+    
+    
+    /*for(var i = 0; i < meshAngles[index].length; i += 1){
     
         //var targetX = xPositions[attachments[index][i]]
         //var targetY = yPositions[attachments[index][i]]
+        
+        ctx.strokeStyle = 'red'
         
         var meshA = meshAngles[index][i]
         
@@ -293,6 +316,10 @@ function drawGear(index){
         ctx.stroke()
         ctx.closePath()
         
+        
+        
+        ctx.strokeStyle = 'orange'
+        
         ctx.beginPath()
         
         var drawX1 = x//ret2[0] * .9 //x * .6 + targetX * .4
@@ -306,11 +333,109 @@ function drawGear(index){
         ctx.lineTo(drawX2, drawY2)
         
         ctx.stroke()
-        ctx.closePath()
+        ctx.closePath() 
     
     }
     
+    for(var i = 0; i < attachmentAngles[index].length; i += 1){
     
+        //var targetX = xPositions[attachments[index][i]]
+        //var targetY = yPositions[attachments[index][i]]
+        
+        //ctx.strokeStyle = 'red'
+        
+        var angle = attachmentAngles[index][i]
+        
+        var ret1 = moveTowards(x,y,angle, radius) 
+        //var ret2 = moveTowards(x,y,meshA[1], radius) 
+        
+        ctx.beginPath()
+        
+        var drawX1 = x//ret1[0] * .9  //x * .6 + targetX * .4
+        var drawY1 = y//ret1[1] * .9 //y * .6 + targetY * .4
+        
+        ctx.moveTo(drawX1,drawY1)
+        
+        var drawX2 = ret1[0] * 1 //x * .6 + targetX * .4
+        var drawY2 = ret1[1] * 1 //y * .6 + targetY * .4
+        
+        ctx.lineTo(drawX2, drawY2)
+        
+        ctx.stroke()
+        ctx.closePath()
+        
+    }
+    
+    //console.log(index)
+    //console.log(meshPoints[index])
+    
+    
+    
+    for (var i = 0; i < meshPoints[index].length; i += 1){
+    
+        ctx.fillStyle = 'green'
+
+        
+        ctx.beginPath()
+        
+        //console.log(meshPoints[index][i][0])
+        //console.log(meshPoints[index][i][1])
+        
+        ctx.arc(meshPoints[index][i][0][0],meshPoints[index][i][0][1],5,0, Math.PI*2)
+        
+        ctx.fill()
+        ctx.stroke()
+        ctx.closePath()
+        ctx.beginPath()
+        
+        ctx.arc(meshPoints[index][i][1][0],meshPoints[index][i][1][1],5,0, Math.PI*2)
+        //ctx.arc(ret[0], ret[1], 15, 0,  2*Math.PI)
+        
+        ctx.fill()
+        ctx.stroke()
+        ctx.closePath()
+        
+    }*/
+    
+    //}
+    
+}
+
+function drawWorm(index){
+
+    var x      = xPositions[index]
+    var y      = yPositions[index]
+    var teeth  = teethNums[index]
+    var angle  = angles[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
+    var parity = parities[index]
+    
+    var teethSegments = teeth * 2
+    
+    var radius = (teethSegments * toothSize)/(2 * Math.PI)
+
+    var strS = ctx.strokeStyle
+    
+    ctx.strokeStyle = 'green'
+    ctx.lineWidth = 7
+    
+    for(var i = 0; i < wormStarts[index].length; i += 1){
+    
+        var start = wormStarts[index][i]
+        var end = wormStops[index][i]
+    
+        //console.log('~~~~~')
+        //console.log(start)
+        //console.log(end)
+    
+        ctx.beginPath()
+        ctx.arc(x,y,radius+3,start,end, parities[index])
+        ctx.stroke()
+        ctx.closePath()
+        
+    }
+    
+    ctx.strokeStyle = strS
+
 }
 
 function scanLinks(){
@@ -336,9 +461,9 @@ function scanLinks(){
                 if(i == 12){
                 
                     //console.log('gear ' + i + ' and ' + j + ' distance: ' + diff)
-                    console.log('distance1 to ' + j + ' : ' + distance1)
-                    console.log('distance2 to ' + j + ' : ' + distance2)
-                    console.log('diff         ' + j + ' : ' + diff)
+                    //console.log('distance1 to ' + j + ' : ' + distance1)
+                    //console.log('distance2 to ' + j + ' : ' + distance2)
+                    //console.log('diff         ' + j + ' : ' + diff)
                 
                 }
                 
@@ -376,10 +501,6 @@ function scanLinks(){
                 
             }            
         
-        
-        
-        
-        
         }
     
     }
@@ -392,17 +513,22 @@ function scanLinks(){
         for(var j = 0; j < attachments[i].length; j++){
         
             //if(j != i){
-        
-            var targetX = xPositions[attachments[i][j]]
-            var targetY = yPositions[attachments[i][j]]
             
-            var r1 = (teethNums[i]*2 * toothSize)/(2 * Math.PI) +5
-            var r2 = (teethNums[j]*2 * toothSize)/(2 * Math.PI) +5
+            var tIndex = attachments[i][j]
+        
+            var targetX = xPositions[tIndex]
+            var targetY = yPositions[tIndex]
+            
+            var r1 = (teethNums[i]*2 * toothSize)/(2 * Math.PI) +10
+            var r2 = (teethNums[tIndex]*2 * toothSize)/(2 * Math.PI) +10
+            
             
             var ret = intersectTwoCircles(xPos,yPos,r1,targetX,targetY,r2)
     
             attachmentAngles[i].push(getAngle(xPos,yPos,targetX,targetY))  // push to most recent one
 
+            meshPoints[i].push([ret[0],ret[1]])
+            
             var angletoMesh11 = getAngle(xPos,yPos,ret[0][0],ret[0][1])
             var angletoMesh12 = getAngle(xPos,yPos,ret[1][0],ret[1][1])
 
@@ -421,29 +547,92 @@ Number.prototype.between = function(a, b) {
   return this > min && this < max;
 };
 
+function highlightCheck(){
+
+    //console.log('highlightCheck')
+    //console.log(wormHead[1])
+    
+    var angle = 0
+    
+    if(wormHead[1] >= 0){
+        angle = (wormHead[1] + Math.PI) % (Math.PI * 2) - Math.PI
+    }
+    if(wormHead[1] < 0){
+        //angle = mod((wormHead[1]), (Math.PI * 2))  - Math.PI //+ Math.PI
+        angle = (wormHead[1] - Math.PI) % (Math.PI * 2) + Math.PI
+    }
+    
+    
+    var meshA = meshAngles[wormHead[0]]
+
+    //console.log(meshA)
+    //console.log(angle)
+    
+    // need to check whole list of attachments, not assume there are three
+    
+    highlight = -1
+    
+    for(var i = 0; i < meshA.length; i += 1){
+    
+        if(checkRotInterval(angle,meshA[i][0],meshA[i][1])){
+        
+            highlight = attachments[wormHead[0]][i]
+            //console.log(attachments[wormHead[0]])
+            //console.log(i)
+            //console.log("angle: " + angle)
+        
+        }
+    }
+}
+
 function jump(){
 
-    var angle = wormHead[1] % (Math.PI * 2)
-
-    console.log(attachments[wormHead[0]])
-    console.log(angle)
-    console.log(wormHead[1])
+    var angle = 0
     
+    if(wormHead[1] >= 0){
+        angle = (wormHead[1] + Math.PI) % (Math.PI * 2) - Math.PI
+    }
+    if(wormHead[1] < 0){
+        //angle = mod((wormHead[1]), (Math.PI * 2))  - Math.PI //+ Math.PI
+        angle = (wormHead[1] - Math.PI) % (Math.PI * 2) + Math.PI
+    }
 
     var meshA = meshAngles[wormHead[0]]
 
+    //console.log(meshA)
     
-    if(angle.between(meshA[0][0],meshA[0][1])){
-        console.log(attachments[wormHead[0]][0])
-    }
-    if(angle.between(meshA[1][0],meshA[1][1])){
-        console.log(attachments[wormHead[0]][1])
-    }
-    if(angle.between(meshA[2][0],meshA[2][1])){
-        console.log(attachments[wormHead[0]][2])
-    }
+    //jump seems to be working correctly but not with gear 0
 
+    
+    for(var i = 0; i < meshA.length; i += 1){
+    
+        if(checkRotInterval(angle,meshA[i][0],meshA[i][1])){
+        
 
+        
+            var targetGear = attachments[wormHead[0]][i]
+            
+            console.log(attachments[wormHead[0]])
+            console.log(targetGear)
+            console.log(attachmentAngles[targetGear])
+            
+            var targetAngle = attachmentAngles[wormHead[0]][i]           
+             
+            console.log(wormStops[0].length)
+            wormStops[wormHead[0]][wormStops[wormHead[0]].length-1] = (normAngle(targetAngle))
+            console.log(wormStops[0].length)
+            
+            wormStarts[targetGear].push(normAngle(targetAngle + Math.PI))
+            wormStops[targetGear].push(normAngle(targetAngle + Math.PI))
+         
+            wormHead[0] = targetGear
+            wormHead[1] = targetAngle + Math.PI
+        
+        }
+    
+
+        
+    }
 }
 
 function lasers(index){
@@ -506,7 +695,7 @@ function addGear(x,y,teeth,angle,parity = 0, attach = []){
     
     attachmentAngles.push([])
     meshAngles.push([])
-   
+    meshPoints.push([])
     
     
     return selfIndex
@@ -584,10 +773,49 @@ function rotate(startIndex, angleDiff, workList = metaList){
     
 }
 
+function normAngle(angle){
+
+    return (angle%(2*Math.PI) + 2*Math.PI) % (2*Math.PI)
+
+}
+
+function checkRotInterval(checkAngle, bound1, bound2){
+
+    var invert = false
+
+    if((bound1 < 0 && bound2 > 0)){// || (bound1 > 0 && bound2 < 0)){
+    
+        invert = true  // if one angle is negative but not the other, it gets flipped around
+                        // this is to compensate for that
+    
+    }
+
+    checkAngle = normAngle(checkAngle)
+    bound1 = normAngle(bound1)
+    bound2 = normAngle(bound2)
+
+    var ret = checkAngle.between(bound1,bound2)
+    
+    if(invert){
+        ret = !ret
+    }
+    
+    if(ret){
+        //console.log('checkRotInterval ~~~')
+        //console.log(checkAngle)
+        //console.log(bound1)
+        //console.log(bound2)
+    
+    }
+    
+    return ret
+}
 
 function rotateRedraw(startIndex,angleDiff){
 
     ret = rotate(startIndex, angleDiff)
+    
+    highlightCheck()
     
     drawGears()
 
@@ -624,6 +852,8 @@ function addPairedGear(prevIndex,toothSegmentAttach, teethNew, checkValid = fals
 }
 
 addGear(110,340,12,1)
+
+
 
 addPairedGear(0,2,12)
 addPairedGear(1,10,12)
@@ -665,7 +895,12 @@ addPairedGear(22,8,4)
 addPairedGear(23,8,4)
 //addPairedGear(23,6,4)
 
+
+
 scanLinks()
+
+wormStarts[0].push([Math.PI])
+wormStops[0].push([Math.PI])
 
 /*
 wormStarts[0].push(1)
@@ -717,11 +952,10 @@ function animate(){
 
         //console.log(rotSum)
     
+        var rotDist = .01
         
-        rotateRedraw(0,.01)
-        rotSum += .01
-        
-
+        rotateRedraw(0,rotDist)
+        rotSum += rotDist
         
         total = (Math.PI * 2) / 12
        
@@ -747,8 +981,44 @@ function animate(){
  window.onload = function() {
     animate()
  };
+ 
+/*
+ctx.strokeStyle = 'red'
 
-document.onclick = function(){jump()};
+var r1 = 200
+var r2 = 90
+
+ctx.beginPath() 
+ctx.arc(300,300,r1,0,2*Math.PI)
+ctx.stroke()
+ctx.closePath()
+
+ctx.strokeStyle = 'blue'
+
+ctx.beginPath()
+ctx.arc(500,500,r2,0,2*Math.PI)
+ctx.stroke()
+ctx.closePath()
+
+//function intersectTwoCircles(x1,y1,r1, x2,y2,r2) {
+
+ret = intersectTwoCircles(300,300,r1,500,500,r2)
+
+ctx.fillStyle = 'black'
+
+ctx.beginPath()
+ctx.arc(ret[0][0],ret[0][1],6,0,2*Math.PI)
+ctx.fill()
+ctx.closePath()
+
+ctx.beginPath()
+ctx.arc(ret[1][0],ret[1][1],6,0,2*Math.PI)
+ctx.fill()
+ctx.closePath()*/
+
+document.onclick = function(){console.log(wormStops[0].length)}//animate()};
+
+document.onkeypress = function(){jump()};
 
 </script>
 
