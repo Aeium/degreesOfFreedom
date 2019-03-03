@@ -1,0 +1,1106 @@
+
+<!-- saved from url=(0028)https://aeium.github.io/729/ -->
+<html><head><meta http-equiv="Content-Type" content="text/html; charset=UTF-8"><title>729</title>
+
+</head><body><div id="container">
+<canvas id="gears" width="820" height="820" style="z-index: 30;"></canvas>
+
+<script src="./game-template_files/sketch.min.js.download"></script>
+
+<script>
+//  <script><iframe scrolling="no" frameborder="0" allowtransparency="true" src="./game-template_files/widget_iframe.5b0c4d3ea3997aa2c22eac39be510646.html" title="Twitter settings iframe" style="display: none;"></iframe></body></html>
+
+// https://gist.github.com/joates/6584908
+function linspace(a,b,n) {
+    if(typeof n === "undefined") n = Math.max(Math.round(b-a)+1,1);
+    if(n<2) { return n===1?[a]:[]; }
+    var i,ret = Array(n);
+    n--;
+    for(i=n;i>=0;i--) { ret[i] = (i*b+(n-i)*a)/n; }
+    return ret;
+}
+
+var toothSize = 20
+
+var collide = false
+
+var recordFrames = false
+if(recordFrames){
+
+var ws = new WebSocket('ws://localhost:8080/');
+		ws.onopen = function() {
+			console.log('CONNECT');
+		};
+		ws.onclose = function() {
+			console.log('DISCONNECT');
+		};
+		ws.onmessage = function(event) {
+			console.log('MESSAGE: ' + event.data);
+		};
+		
+		var frames = 656100;
+		// Request Animation Frame Override
+		var raf = window.requestAnimationFrame;
+		var next = null;
+		var hold = false;
+		window.requestAnimationFrame = function rafOverride(callback) {
+		  // Find canvas
+		  var canvas = document.getElementById("gears");//document.querySelector('canvas');
+		  if (canvas) {
+		    // Done capturing?
+		    if (frames < 0) {
+		      window.requestAnimationFrame = raf;
+		      return raf(callback);
+		    }
+		    // Hold rendering until screenshot is done
+		    if (!hold) {
+		      hold = true;
+		      frames--;
+		      setTimeout(function () {
+		        callback();
+		        capture(canvas, function () {
+		          // Resume rendering
+		          hold = false;
+		          rafOverride(next);
+		        });
+		      }, 5);
+		    }
+		    else {
+		      next = callback;
+		    }
+		  }
+		  else {
+		    // Canvas not created yet?
+		    return raf(callback);
+		  }
+		}
+		function capture(canvas, callback) {
+		  // Capture image and strip header from string.  
+		  
+		  //var pixNum = animRetY * 810 +  animRetX
+		  
+		  //console.log(pixNum)
+		  
+		  
+		  var image = canvas.toDataURL('image/png').slice(22); //("000000" + pixNum).slice(-6) + 
+		  // Writing image as msg
+		  ws.send(image);
+		  setTimeout(function () {
+		    // Resume rendering
+		    callback();
+		  }, 5);
+		}
+
+}
+
+// d = 2 * pi * r   d/(2*pi) = r 
+
+function mod(input, modulus){
+
+    return ((input % modulus) + modulus) % modulus
+
+}
+
+var canvas = document.getElementById('gears')
+var ctx    = canvas.getContext('2d')
+
+
+ctx.fillStyle   = 'grey'
+ctx.strokeStyle = 'black'
+ctx.lineWidth   = 3
+
+// data oriented makes more sense, but for this task and also in general
+metaList     = []
+puzzleValues = []
+xPositions   = []
+yPositions   = []
+teethNums    = []
+angles       = []
+parities     = []
+
+attachments      = []   // this is going to be a list of lists
+attachmentsVisit = []
+attachmentAngles = []
+meshAngles       = [] // angle of where mesh starts
+meshPoints       = []
+
+
+
+wormHead         = [0, Math.PI ]    // int gear index, float radian position
+  
+wormStarts       = []
+wormStops        = []
+
+
+var highlight = -1
+
+function intersectTwoCircles(x1,y1,r1, x2,y2,r2) {
+  var centerdx = x1 - x2;
+  var centerdy = y1 - y2;
+  var R = Math.sqrt(centerdx * centerdx + centerdy * centerdy);
+  if (!(Math.abs(r1 - r2) <= R && R <= r1 + r2)) { // no intersection
+    return []; // empty list of results
+  }
+  // intersection(s) should exist
+
+  var R2 = R*R;
+  var R4 = R2*R2;
+  var a = (r1*r1 - r2*r2) / (2 * R2);
+  var r2r2 = (r1*r1 - r2*r2);
+  var c = Math.sqrt(2 * (r1*r1 + r2*r2) / R2 - (r2r2 * r2r2) / R4 - 1);
+
+  var fx = (x1+x2) / 2 + a * (x2 - x1);
+  var gx = c * (y2 - y1) / 2;
+  var ix1 = fx + gx;
+  var ix2 = fx - gx;
+
+  var fy = (y1+y2) / 2 + a * (y2 - y1);
+  var gy = c * (x1 - x2) / 2;
+  var iy1 = fy + gy;
+  var iy2 = fy - gy;
+
+  // note if gy == 0 and gx == 0 then the circles are tangent and there is only one solution
+  // but that one solution will just be duplicated as the code is currently written
+  return [[ix1, iy1], [ix2, iy2]];
+}
+
+
+
+// the basic idea is to have a set of gears that are intermeshed, but some of the gears have gaps.
+// the player must move the gears back and forth to detangle the original gear
+
+var count = 0
+
+function getSum(total, num) {
+  return total + Math.round(num);
+}
+
+
+function drawGears(){
+
+    //ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'skyblue'
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    //for(var i = 0; i < xPositions.length; i++){
+    //    lasers(i)
+    //}
+    
+    for(var i = 0; i < xPositions.length; i++){
+        drawGear(i)
+    }
+
+    
+    var wHG  = wormHead[0]  // worm head gear
+    var wHA  = wormHead[1]  // worm head angle
+    
+    //console.log(wormHead)
+    
+    var radius = (teethNums[wHG]* 2 * toothSize)/(2 * Math.PI)
+    
+    var ret = moveTowards(xPositions[wHG],yPositions[wHG],wHA,radius)
+
+    //console.log(ret)
+    
+    //if(count % 20 == 0){
+    
+    //console.log(wormHead[1])
+    
+    //}
+    
+    wormStops[wHG][wormStops[wHG].length-1] = wHA
+    
+    count += 1
+    
+    ctx.strokeStyle = 'yellow'
+    ctx.fillStyle = 'yellow'
+    
+    ctx.beginPath()
+    
+    ctx.arc(ret[0], ret[1], 11, 0,  2*Math.PI)
+    
+    ctx.fill()
+    ctx.stroke()
+    ctx.closePath()
+    
+    for(var i = 0; i < xPositions.length; i++){
+        drawWorm(i)
+    }
+    
+    visitSum = 0
+    
+    for(var i = 0; i < attachmentsVisit.length; i++){
+    
+        visitSum += parseInt(attachmentsVisit[i].reduce(getSum))
+    
+    }
+    
+    ctx.fillText("Sum: " + visitSum, 40, 40)
+    
+    console.log(visitSum)
+   
+}
+
+
+
+function drawGear(index){ 
+
+    var x      = xPositions[index]
+    var y      = yPositions[index]
+    var teeth  = teethNums[index]
+    var angle  = angles[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
+    var parity = parities[index]
+    
+
+    
+    var teethSegments = teeth * 2
+    
+    var radius = (teethSegments * toothSize)/(2 * Math.PI)
+    
+    //console.log(angle)
+    
+    var arcFraction = 2*Math.PI / teethSegments
+    
+    ctx.beginPath()
+    
+    
+     
+    for(var i = 0; i < teethSegments+1; i++){
+
+        //console.log(i)
+
+        if(i%2 == parity){
+            ctx.arc(x,y,radius-10,(angle-arcFraction/2)+i*arcFraction+arcFraction/6,(angle-arcFraction/2)+(i+1)*arcFraction-arcFraction/6)
+        } else {
+            ctx.arc(x,y,radius+10,(angle-arcFraction/2)+i*arcFraction+arcFraction/6,(angle-arcFraction/2)+(i+1)*arcFraction-arcFraction/6)
+        }
+    }
+    
+    if(parity == 0){
+    
+        ctx.fillStyle = 	"rgb(42,42,52)"
+    
+    } else {
+    
+        ctx.fillStyle = 	"rgb(100,100,110)"
+    }
+    
+    ctx.lineWidth = 4
+    
+    ctx.fill()
+    
+    //console.log(highlight)
+    
+    if(highlight == index){
+        //console.log(ctx.strokeStyle)
+        ctx.stroke()
+    }
+    
+    //if(count %20  == 0){
+    
+    //}
+    
+    
+    ctx.font = "20px Georgia";
+    ctx.fillStyle = 'red'
+    
+    ctx.fillText(puzzleValues[index], x,y)
+    
+    //if(index == 0){
+    
+    ctx.lineWidth = 1
+    
+    
+    /*for(var i = 0; i < meshAngles[index].length; i += 1){
+    
+        //var targetX = xPositions[attachments[index][i]]
+        //var targetY = yPositions[attachments[index][i]]
+        
+        ctx.strokeStyle = 'red'
+        
+        var meshA = meshAngles[index][i]
+        
+        var ret1 = moveTowards(x,y,meshA[0], radius) 
+        var ret2 = moveTowards(x,y,meshA[1], radius) 
+        
+        ctx.beginPath()
+        
+        var drawX1 = x//ret1[0] * .9  //x * .6 + targetX * .4
+        var drawY1 = y//ret1[1] * .9 //y * .6 + targetY * .4
+        
+        ctx.moveTo(drawX1,drawY1)
+        
+        var drawX2 = ret1[0] * 1 //x * .6 + targetX * .4
+        var drawY2 = ret1[1] * 1 //y * .6 + targetY * .4
+        
+        ctx.lineTo(drawX2, drawY2)
+        
+        ctx.stroke()
+        ctx.closePath()
+        
+        
+        
+        ctx.strokeStyle = 'orange'
+        
+        ctx.beginPath()
+        
+        var drawX1 = x//ret2[0] * .9 //x * .6 + targetX * .4
+        var drawY1 = y//ret2[1] * .9 //y * .6 + targetY * .4
+        
+        ctx.moveTo(drawX1,drawY1)
+        
+        var drawX2 = ret2[0] * 1 //x * .6 + targetX * .4
+        var drawY2 = ret2[1] * 1 //y * .6 + targetY * .4
+        
+        ctx.lineTo(drawX2, drawY2)
+        
+        ctx.stroke()
+        ctx.closePath() 
+    
+    }
+    
+    for(var i = 0; i < attachmentAngles[index].length; i += 1){
+    
+        //var targetX = xPositions[attachments[index][i]]
+        //var targetY = yPositions[attachments[index][i]]
+        
+        //ctx.strokeStyle = 'red'
+        
+        var angle = attachmentAngles[index][i]
+        
+        var ret1 = moveTowards(x,y,angle, radius) 
+        //var ret2 = moveTowards(x,y,meshA[1], radius) 
+        
+        ctx.beginPath()
+        
+        var drawX1 = x//ret1[0] * .9  //x * .6 + targetX * .4
+        var drawY1 = y//ret1[1] * .9 //y * .6 + targetY * .4
+        
+        ctx.moveTo(drawX1,drawY1)
+        
+        var drawX2 = ret1[0] * 1 //x * .6 + targetX * .4
+        var drawY2 = ret1[1] * 1 //y * .6 + targetY * .4
+        
+        ctx.lineTo(drawX2, drawY2)
+        
+        ctx.stroke()
+        ctx.closePath()
+        
+    }
+    
+    //console.log(index)
+    //console.log(meshPoints[index])
+    
+    
+    
+    for (var i = 0; i < meshPoints[index].length; i += 1){
+    
+        ctx.fillStyle = 'green'
+
+        
+        ctx.beginPath()
+        
+        //console.log(meshPoints[index][i][0])
+        //console.log(meshPoints[index][i][1])
+        
+        ctx.arc(meshPoints[index][i][0][0],meshPoints[index][i][0][1],5,0, Math.PI*2)
+        
+        ctx.fill()
+        ctx.stroke()
+        ctx.closePath()
+        ctx.beginPath()
+        
+        ctx.arc(meshPoints[index][i][1][0],meshPoints[index][i][1][1],5,0, Math.PI*2)
+        //ctx.arc(ret[0], ret[1], 15, 0,  2*Math.PI)
+        
+        ctx.fill()
+        ctx.stroke()
+        ctx.closePath()
+        
+    }*/
+    
+    //}
+    
+}
+
+function wormCollide(){
+
+    //console.log('wormCollide')
+    
+    var index = wormHead[0]
+
+    if(wormStops[index].length <= 1){
+    
+        //console.log(ret)
+        
+        //console.log(wormStops[index][0] - wormStarts[index][0])
+        
+        if(wormStops[index][0] - wormStarts[index][0] >= (Math.PI * 2)){
+        
+            
+        
+            return true
+        
+        }
+    
+        return false // can't collide if only one segment
+    
+    }
+    
+    var wHA = wormHead[1]
+    
+    for(var i = 0; i < wormStops[index].length-1; i += 1){
+    
+        if(checkRotInterval(wHA, wormStarts[index][i],wormStops[index][i])){
+        
+            return true
+        }
+    
+    }
+    
+    return false
+
+}
+
+function drawWorm(index){
+
+    var x      = xPositions[index]
+    var y      = yPositions[index]
+    var teeth  = teethNums[index]
+    var angle  = angles[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
+    var parity = parities[index]
+    
+    var teethSegments = teeth * 2
+    
+    var radius = (teethSegments * toothSize)/(2 * Math.PI)
+
+    var strS = ctx.strokeStyle
+    
+    ctx.strokeStyle = 'green'
+    ctx.lineWidth = 7
+    
+    for(var i = 0; i < wormStarts[index].length; i += 1){
+    
+        var start = wormStarts[index][i]
+        var end = wormStops[index][i]
+    
+        //console.log('~~~~~')
+        //console.log(start)
+        //console.log(end)
+    
+        ctx.beginPath()
+        ctx.arc(x,y,radius+2,start,end, parities[index])
+        ctx.stroke()
+        ctx.closePath()
+        
+    }
+    
+    ctx.strokeStyle = strS
+
+}
+
+function scanLinks(){
+
+    for(var i = 0; i < metaList.length; i++){
+    
+        var xPos = xPositions[i]
+        var yPos = yPositions[i]
+        
+        for(var j = 0; j < metaList.length; j++){
+        
+            if(j != i){
+
+                var compX = xPositions[j]
+                var compY = yPositions[j]
+
+                var distance1 = (teethNums[i] * toothSize)/(2 * Math.PI) + (teethNums[j] * toothSize)/(2 * Math.PI)
+
+                var distance2 = Math.sqrt(Math.pow((xPos - compX),2) + Math.pow((yPos - compY),2)) /2
+                
+                var diff = distance2 - distance1
+                
+                if(i == 12){
+                
+                    //console.log('gear ' + i + ' and ' + j + ' distance: ' + diff)
+                    //console.log('distance1 to ' + j + ' : ' + distance1)
+                    //console.log('distance2 to ' + j + ' : ' + distance2)
+                    //console.log('diff         ' + j + ' : ' + diff)
+                
+                }
+                
+                if(diff < 0){
+                
+                    // invalid mesh
+                    
+                    console.log('invalid mesh detected between gear ' + i + " and " + j )
+                
+                }
+                else if(diff < 10){
+                
+                    // valid mesh
+                    
+                    var visit = [0]
+                    
+                    if(! attachments[i].includes(j)){
+                    
+                        attachments[i].push(j)
+                        attachmentsVisit[i].push(visit)
+                    
+                    }
+                    
+                    if(! attachments[j].includes(i)){
+                    
+                        attachments[j].push(i)
+                        attachmentsVisit[j].push(visit)
+                    
+                    }
+                
+                }
+                else{
+                
+                    // too far
+                    
+                    // do nothing for now
+                
+                }
+                
+            }            
+        
+        }
+    
+    }
+    
+    for(var i = 0; i < metaList.length; i++){
+    
+        var xPos = xPositions[i]
+        var yPos = yPositions[i]
+        
+        for(var j = 0; j < attachments[i].length; j++){
+        
+            //if(j != i){
+            
+            var tIndex = attachments[i][j]
+        
+            var targetX = xPositions[tIndex]
+            var targetY = yPositions[tIndex]
+            
+            var r1 = (teethNums[i]*2 * toothSize)/(2 * Math.PI) +10
+            var r2 = (teethNums[tIndex]*2 * toothSize)/(2 * Math.PI) +10
+            
+            
+            var ret = intersectTwoCircles(xPos,yPos,r1,targetX,targetY,r2)
+    
+            attachmentAngles[i].push(getAngle(xPos,yPos,targetX,targetY))  // push to most recent one
+
+            meshPoints[i].push([ret[0],ret[1]])
+            
+            var angletoMesh11 = getAngle(xPos,yPos,ret[0][0],ret[0][1])
+            var angletoMesh12 = getAngle(xPos,yPos,ret[1][0],ret[1][1])
+
+            meshAngles[i].push([angletoMesh11,angletoMesh12])
+            //meshAngles[index2].push([angletoMesh21,angletoMesh22])
+
+            //}
+        }
+    }
+    
+}
+
+Number.prototype.between = function(a, b) {
+  var min = Math.min.apply(Math, [a, b]),
+    max = Math.max.apply(Math, [a, b]);
+  return this > min && this < max;
+};
+
+function highlightCheck(){
+
+    //console.log('highlightCheck')
+    //console.log(wormHead[1])
+    
+    var angle = 0
+    
+    if(wormHead[1] >= 0){
+        angle = (wormHead[1] + Math.PI) % (Math.PI * 2) - Math.PI
+    }
+    if(wormHead[1] < 0){
+        //angle = mod((wormHead[1]), (Math.PI * 2))  - Math.PI //+ Math.PI
+        angle = (wormHead[1] - Math.PI) % (Math.PI * 2) + Math.PI
+    }
+    
+    
+    var meshA = meshAngles[wormHead[0]]
+
+    //console.log(meshA)
+    //console.log(angle)
+    
+    // need to check whole list of attachments, not assume there are three
+    
+    highlight = -1
+    
+    for(var i = 0; i < meshA.length; i += 1){
+    
+        if(checkRotInterval(angle,meshA[i][0],meshA[i][1])){
+        
+            highlight = attachments[wormHead[0]][i]
+            attachmentsVisit[wormHead[0]][i] = 1
+            //console.log(attachments[wormHead[0]])
+            //console.log(i)
+            //console.log("angle: " + angle)
+        
+        }
+    }
+}
+
+function jump(){
+
+    var angle = 0
+    
+    if(wormHead[1] >= 0){
+        angle = (wormHead[1] + Math.PI) % (Math.PI * 2) - Math.PI
+    }
+    if(wormHead[1] < 0){
+        //angle = mod((wormHead[1]), (Math.PI * 2))  - Math.PI //+ Math.PI
+        angle = (wormHead[1] - Math.PI) % (Math.PI * 2) + Math.PI
+    }
+
+    var meshA = meshAngles[wormHead[0]]
+
+    //console.log(meshA)
+    
+    //jump seems to be working correctly but not with gear 0
+
+    
+    for(var i = 0; i < meshA.length; i += 1){
+    
+        if(checkRotInterval(angle,meshA[i][0],meshA[i][1])){
+        
+
+        
+            var targetGear = attachments[wormHead[0]][i]
+            
+            console.log(attachments[wormHead[0]])
+            console.log(targetGear)
+            console.log(attachmentAngles[targetGear])
+            
+            var targetAngle = attachmentAngles[wormHead[0]][i]           
+             
+            console.log(wormStops[0].length)
+            wormStops[wormHead[0]][wormStops[wormHead[0]].length-1] = (normAngle(targetAngle))
+            console.log(wormStops[0].length)
+         
+            wormHead[0] = targetGear
+            wormHead[1] = targetAngle + Math.PI
+            
+            if(wormStops[wormHead[0]].includes(wormHead[1])){
+            
+                collide = true // this means we just jumped in where the worm already jumped out
+            
+            }
+            
+            wormStarts[targetGear].push(normAngle(targetAngle + Math.PI))
+            wormStops[targetGear].push(normAngle(targetAngle + Math.PI))
+        
+        }
+    
+
+        
+    }
+}
+
+
+function lasers(index){
+
+    var x      = xPositions[index]
+    var y      = yPositions[index]
+    var teeth  = teethNums[index]
+    var angle  = angles[index]    // angle is in radians, 0/2 will be 6:00, 1 will be 12:00
+    var parity = parities[index]
+    
+    
+    
+    var teethSegments = teeth * 2
+    
+    var radius = (teethSegments * toothSize)/(2 * Math.PI)
+    
+    //console.log(angle)
+    
+    var arcFraction = 2*Math.PI / teethSegments
+    
+    ctx.beginPath()
+
+    ctx.beginPath()
+    ctx.moveTo(x,y)
+    
+    var dest = moveTowards(x,y, angle, 2000 )
+    
+    if(parity == 1){
+        ctx.strokeStyle = "rgb(100,100,110)"
+    } else {
+        ctx.strokeStyle = "rgb(42,42,52)"
+    }
+    
+    ctx.lineTo(dest[0],dest[1])
+    ctx.stroke()
+    ctx.closePath()
+    
+    ctx.strokeStyle = 'black'
+
+}
+
+// prev index gives reference to the previous gears
+// toothSegmentAttach tell new gear where to go and what slot or peg to touch
+// checkValid scans other gears to find conflicts (if I implement it)
+
+function addGear(x,y,teeth,angle,parity = 0, puzzleValue = 0){
+
+    var selfIndex = metaList.length
+
+    metaList.push(selfIndex)
+    puzzleValues.push(puzzleValue)
+    
+    attachments.push([])
+    attachmentsVisit.push([])
+    
+    xPositions.push(x)
+    yPositions.push(y)
+    teethNums.push(teeth)
+    angles.push(angle)
+    parities.push(parity)
+
+    wormStarts.push([])
+    wormStops.push([])
+    
+    attachmentAngles.push([])
+    meshAngles.push([])
+    meshPoints.push([])
+    
+    
+    return selfIndex
+    
+}
+
+
+function moveTowards(x,y,angle,distance){
+
+    newX = x + Math.cos(angle) * distance
+    newY = y + Math.sin(angle) * distance
+    return [newX,newY]
+}
+
+function getAngle(x1,y1,x2,y2){
+
+    diffX = x2 - x1
+    diffY = y2 - y1
+
+    return(Math.atan2(diffY,diffX))// + Math.PI)
+    
+}
+
+
+function rotate(startIndex, angleDiff, workList = metaList){
+
+    // list contains a number for each gear.
+    // I don't want to process any gear more than once on the same turn
+    // So I am having each rotation cross it's gear number off the list
+    
+    if(workList.includes(startIndex)){
+        var self = workList.indexOf(startIndex)
+        workList = workList.slice(0, self).concat(workList.slice(self + 1, workList.length))
+    }
+    else {
+        return workList
+    }
+    //var workList = list.slice(0, i).concat(list.slice(i + 1, list.length))
+
+    //console.log(workList)
+    
+    var startGearTeeth = teethNums[startIndex]
+    
+    if(parities[startIndex] == 0){
+        angles[startIndex] += angleDiff
+    } else {
+        angles[startIndex] -= angleDiff
+    }
+    
+    if(startIndex == wormHead[0]){
+    
+        if(parities[startIndex] == 0){
+            wormHead[1] += angleDiff
+        } else {
+            wormHead[1] -= angleDiff
+        }
+    
+    }
+    
+    
+    for(var i = 0; i < attachments[startIndex].length; i++){
+    
+        if(workList.includes(attachments[startIndex][i])){
+        
+            var target = attachments[startIndex][i]
+            var targetTeeth = teethNums[target]
+            
+            var targetDiff = angleDiff * (startGearTeeth / targetTeeth)
+            
+            workList = rotate(attachments[startIndex][i],targetDiff,workList)
+        }
+    }
+
+    return workList
+    
+}
+
+function normAngle(angle){
+
+    return (angle%(2*Math.PI) + 2*Math.PI) % (2*Math.PI)
+
+}
+
+function checkRotInterval(checkAngle, bound1, bound2){
+
+    var invert = false
+
+    if((bound1 < 0 && bound2 > 0)){// || (bound1 > 0 && bound2 < 0)){
+    
+        invert = true  // if one angle is negative but not the other, it gets flipped around
+                        // this is to compensate for that
+    
+    }
+
+    checkAngle = normAngle(checkAngle)
+    bound1 = normAngle(bound1)
+    bound2 = normAngle(bound2)
+
+    var ret = checkAngle.between(bound1,bound2)
+    
+    if(invert){
+        ret = !ret
+    }
+    
+    if(ret){
+        //console.log('checkRotInterval ~~~')
+        //console.log(checkAngle)
+        //console.log(bound1)
+        //console.log(bound2)
+    
+    }
+    
+    return ret
+}
+
+function rotateRedraw(startIndex,angleDiff){
+
+    ret = rotate(startIndex, angleDiff)
+    
+    highlightCheck()
+    
+    drawGears()
+
+}
+
+function addPairedGear(prevIndex,toothSegmentAttach, teethNew, puzzleValue = 0, checkValid = false){
+
+    var prI = prevIndex
+    
+    var prevX        = xPositions[prI]
+    var prevY        = yPositions[prI]
+    
+    var prevAngle    = angles[prI]
+    var prevSegments = teethNums[prI]*2
+    
+    var arcFractionOld = 2*Math.PI / prevSegments
+    var towardsNew = prevAngle + toothSegmentAttach * arcFractionOld // gives the angle towards the new gear
+    
+    var oldRadius = (prevSegments * toothSize)/(2 * Math.PI)
+    var newRadius = (teethNew * 2 * toothSize)/(2 * Math.PI)
+
+    var newPos = moveTowards(prevX,prevY,towardsNew,oldRadius+newRadius+3)
+    
+    var newX = newPos[0]
+    var newY = newPos[1]
+    
+    var oldParity = parities[prevIndex]
+    
+    //console.log(towardsNew)
+    
+    //attachments[prevIndex].push(xPositions.length)  // old length of this will be index of new object
+    addGear(newX,newY,teethNew,towardsNew+Math.PI,(oldParity+1)%2, puzzleValue = puzzleValue)
+
+}
+
+addGear(110,340,12,1)
+
+
+
+addPairedGear(0,2,12)
+addPairedGear(1,10,12)
+addPairedGear(2,10,12)
+addPairedGear(3,10,12)
+addPairedGear(4,10,12)
+addPairedGear(5,10,12)
+addPairedGear(6,10,12)
+addPairedGear(7,10,12)
+addPairedGear(8,10,12)
+addPairedGear(9,10,12)
+addPairedGear(10,10,12)
+//addPairedGear(11,10,12)
+
+addPairedGear(0,20,7)
+addPairedGear(1,4,7)
+addPairedGear(2,4,7)
+addPairedGear(3,4,7)
+addPairedGear(4,4,7)
+addPairedGear(5,4,7)
+addPairedGear(6,4,7)
+addPairedGear(7,4,7)
+addPairedGear(8,4,7)
+addPairedGear(9,4,7)
+addPairedGear(10,4,7)
+addPairedGear(11,4,7)
+
+addPairedGear(12,8,4)
+addPairedGear(13,8,4)
+addPairedGear(14,8,4)
+addPairedGear(15,8,4)
+addPairedGear(16,8,4)
+addPairedGear(17,8,4)
+addPairedGear(18,8,4)
+addPairedGear(19,8,4)
+addPairedGear(20,8,4)
+addPairedGear(21,8,4)
+addPairedGear(22,8,4)
+addPairedGear(23,8,4)
+//addPairedGear(23,6,4)
+
+
+
+scanLinks()
+
+wormStarts[0].push([Math.PI])
+wormStops[0].push([Math.PI])
+
+/*
+wormStarts[0].push(1)
+wormStarts[0].push(2)
+wormStarts[1].push(1)
+wormStarts[1].push(2)
+
+wormStarts[2].push(1)
+//wormStarts[2].push(2)
+
+wormStops[0].push(1.5)
+wormStops[0].push(2.5)
+wormStops[1].push(1.5)
+wormStops[1].push(2.5)
+
+wormStops[2].push(5)
+//wormStops[2].push(2.5)*/
+
+
+//addGear(545,420,13,1)
+
+worm = []
+
+
+drawGears()
+
+var rotSum = 0
+
+var fps = 40
+function movediv(timestamp){
+    //setTimeout(function(){ //throttle requestAnimationFrame to 20fps
+        rotateRedraw(0,.01)
+        rotSum += .01
+        
+        total = (Math.PI * 2) / 12
+        
+        if(rotSum >= total){
+        
+            recordFrames = false
+        }
+        
+        window.requestAnimationFrame(movediv)
+    //}, 1000/fps)
+}
+
+var frameCount = 0 
+
+function animate(){
+
+        //console.log(rotSum)
+    
+        var rotDist = .01
+        
+        rotateRedraw(0,rotDist)
+        rotSum += rotDist
+        
+        total = (Math.PI * 2) / 12
+       
+        if(false){ //rotSum >= total){
+        
+            recordFrames = false
+        } else {
+        
+            if( frameCount % 10 == 0){
+            
+                //console.log("interval  " + rotSum + " / " + total)
+            
+            }
+            
+            if(!collide){
+            
+                collide = wormCollide()
+            
+            }
+            
+            //console.log(frameCount)
+            if(! collide){
+                window.requestAnimationFrame(animate)
+            }
+        }
+        frameCount += 1
+}
+
+ window.onload = function() {
+    animate()
+ };
+ 
+/*
+ctx.strokeStyle = 'red'
+
+var r1 = 200
+var r2 = 90
+
+ctx.beginPath() 
+ctx.arc(300,300,r1,0,2*Math.PI)
+ctx.stroke()
+ctx.closePath()
+
+ctx.strokeStyle = 'blue'
+
+ctx.beginPath()
+ctx.arc(500,500,r2,0,2*Math.PI)
+ctx.stroke()
+ctx.closePath()
+
+//function intersectTwoCircles(x1,y1,r1, x2,y2,r2) {
+
+ret = intersectTwoCircles(300,300,r1,500,500,r2)
+
+ctx.fillStyle = 'black'
+
+ctx.beginPath()
+ctx.arc(ret[0][0],ret[0][1],6,0,2*Math.PI)
+ctx.fill()
+ctx.closePath()
+
+ctx.beginPath()
+ctx.arc(ret[1][0],ret[1][1],6,0,2*Math.PI)
+ctx.fill()
+ctx.closePath()*/
+
+document.onclick = function(){console.log(wormStops[0].length)}//animate()};
+
+document.onkeypress = function(){jump()};
+
+</script>
+
